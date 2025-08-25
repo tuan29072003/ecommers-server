@@ -1,24 +1,14 @@
 const mongoose = require('mongoose')
-const {Schema} = require('mongoose')
+const { Schema } = require('mongoose')
 const supplierScheme = new Schema({
 	name: {
 		type: String,
 		required: true,
 	},
 	slug: String,
-	product: String,
-	categories: {
-		type: [String],
-	},
-	price: Number,
 	contact: String,
-	status: {
-		type: Number,
-		default: 0,
-		enum: [0, 1],
-	},
-	email:String,
-	address:String,
+	email: String,
+	address: String,
 	photoURL: String,
 	createdAt: {
 		type: Date,
@@ -27,6 +17,10 @@ const supplierScheme = new Schema({
 	updatedAt: {
 		type: Date,
 		default: Date.now(),
+	},
+	isDeleted: {
+		type: Boolean,
+		default: false
 	}
 });
 

@@ -1,20 +1,45 @@
-const  SupplierModel = require('../models/SupplierModel');
+const SupplierModel = require('../models/SupplierModel');
 
 
 const getSuppliers = async (req, res) => {
+	const { id, key } = req.query; // Lấy id từ query params
 	try {
-		const items = await SupplierModel.find({})
-		const total = await SupplierModel.countDocuments();
-		res.status(200).json({
-			message: 'Suppliers',
-			data: { total, items }
-		})
+		if (id) {
+			// Nếu có id, tìm kiếm theo id đó
+			const items = await SupplierModel.findById(id);
+			if (!items) {
+				return res.status(404).json({ message: 'Supplier not found' });
+			}
+			res.status(200).json({
+				message: 'Supplier found',
+				data: items
+			});
+		} else if (key) {
+			const filter = {};
+			filter.slug = { $regex: key };
+			const items = await SupplierModel.find(filter);
+			const total = items.length
+			res.status(200).json({
+				message: 'Supplier found',
+				data: { total, items }
+			});
+		}
+		else {
+			// Nếu không có id, lấy tất cả nhà cung cấp
+			const items = await SupplierModel.find({});
+			const total = await SupplierModel.countDocuments();
+			res.status(200).json({
+				message: 'Suppliers',
+				data: { total, items }
+			});
+		}
 	} catch (error) {
 		res.status(400).json({
 			message: error.message
-		})
+		});
 	}
-}
+};
+
 const addNew = async (req, res) => {
 	const body = req.body;
 	try {
@@ -36,7 +61,7 @@ const update = async (req, res) => {
 	const { id } = req.query;
 	try {
 		await SupplierModel.findByIdAndUpdate(id, {
-			...body,updatedAt:Date.now()
+			...body, updatedAt: Date.now()
 		});
 
 		res.status(200).json({
@@ -66,22 +91,22 @@ const removeSupplier = async (req, res) => {
 };
 const getExportData = async (req, res) => {
 	const body = req.body
-	const {start,end} = req.query
+	const { start, end } = req.query
 	const filter = {}
-	if(start && end){
-		filter.createdAt={
-			$lte:end,
-			$gte:start
+	if (start && end) {
+		filter.createdAt = {
+			$lte: end,
+			$gte: start
 		}
 	}
 	try {
 		const items = await SupplierModel.find(filter)
 		const data = []
-		if(items.length>0){
-			items.forEach(item=>{
+		if (items.length > 0) {
+			items.forEach(item => {
 				const value = {}
 				body.forEach(key => {
-					value[`${key}`] = `${item[`${key}`]??''}`
+					value[`${key}`] = `${item[`${key}`] ?? ''}`
 				})
 				data.push(value)
 			})
@@ -96,4 +121,4 @@ const getExportData = async (req, res) => {
 		})
 	}
 }
-module.exports = {getSuppliers,addNew,update,removeSupplier,getExportData}
+module.exports = { getSuppliers, addNew, update, removeSupplier, getExportData }

@@ -139,13 +139,13 @@ const getFilterValues = async (req, res) => {
 	try {
 		const datas = await SubProductModel.find();
 
-		const colors = [];
+		const fragrances = [];
 		const sizes = [];
 		const prices = [];
 
 		if (datas.length > 0) {
 			datas.forEach((item) => {
-				item.color && !colors.includes(item.color) && colors.push(item.color);
+				item.fragrance && !fragrances.includes(item.fragrance) && colors.push(item.fragrance);
 				item.size && sizes.push({ label: item.size, value: item.size });
 				prices.push(item.price);
 			});
@@ -155,7 +155,7 @@ const getFilterValues = async (req, res) => {
 		res.status(200).json({
 			message: 'get',
 			data: {
-				colors,
+				fragrances,
 				prices,
 				sizes,
 			},
@@ -168,68 +168,100 @@ const getFilterValues = async (req, res) => {
 };
 //product
 const getProduct = async (req, res) => {
-	const { page, pageSize, title, catIds } = req.query;
-
-	const filter = {};
-
-	filter.isDeleted = false;
-
-	if (title) {
-		filter.slug = { $regex: title };
-	}
-
-	if (catIds) {
-		const categoriesIds = catIds.includes(',') ? catIds.split(',') : [catIds];
-		filter.categories = { $in: categoriesIds };
-	}
-
 	try {
-		const skip = (page - 1) * pageSize;
+		const { page = 1, pageSize = 10, title, catIds, price, search } = req.query;
 
-		const products = await ProductModel.find(filter).skip(skip).limit(pageSize);
-		const count = await ProductModel.find(filter);
+		const filter = { isDeleted: false };
 
-		const total = await ProductModel.find({
-			isDeleted: false,
+		// Lọc theo title hoặc search
+		if (title || search) {
+			const searchRegex = new RegExp(title || search, "i");
+			filter.slug = searchRegex;
+		}
+
+		// Lọc theo danh mục (catIds)
+		if (catIds) {
+			const categoryIdsArray = catIds.split(',').map(id => id.trim());
+			filter.categories = { $in: categoryIdsArray };
+		}
+
+		// Nếu có lọc theo giá, tìm tất cả SubProducts trước
+		let subProductFilter = { isDeleted: false };
+
+		if (price) {
+			const prices = price.split(',').map(Number);
+			if (prices.length === 2) {
+				subProductFilter.price = { $gte: prices[0], $lte: prices[1] };
+			}
+		}
+
+		const subProducts = await SubProductModel.find(subProductFilter);
+		const subProductIds = subProducts.map(sub => sub.productId.toString());
+
+		// Nếu có lọc theo giá, chỉ lấy sản phẩm có subProduct thỏa mãn giá
+		if (price) {
+			filter._id = { $in: subProductIds };
+		}
+
+		// Lấy danh sách sản phẩm theo bộ lọc
+		const allProducts = await ProductModel.find(filter)
+			.skip((page - 1) * pageSize)
+			.limit(Number(pageSize));
+
+		// Kết hợp sản phẩm với subItems
+		const items = allProducts.map(product => {
+			const subItems = subProducts.filter(sub => sub.productId.toString() === product._id.toString());
+			return { ...product._doc, subItems };
 		});
 
-		const items = [];
-		const pageCount = Math.ceil(count.length / pageSize);
+		// Tính tổng số sản phẩm sau khi lọc
+		const totalItems = await ProductModel.countDocuments(filter);
+		const pageCount = Math.ceil(totalItems / pageSize);
 
-		if (products.length > 0) {
-			products.forEach(async (item) => {
-				const children = await SubProductModel.find({
-					productId: item._id,
-					isDeleted: false,
-				});
+		return res.status(200).json({
+			message: 'Products',
+			data: {
+				items,
+				totalItems,
+				pageCount,
+			},
+		});
+	} catch (error) {
+		console.error("Error fetching products:", error);
+		res.status(500).json({
+			message: "Internal Server Error",
+		});
+	}
+};
 
-				items.push({
-					...item._doc,
-					subItems: children ?? [],
-				});
 
-				items.length === products.length &&
-					res.status(200).json({
-						message: 'Products',
-						data: {
-							items,
-							totalItems: total.length,
-							pageCount,
-						},
-					});
-			});
-		} else {
-			res.status(200).json({
-				message: 'Products',
-				data: [],
-			});
+
+
+const getAllSubProducts = async (_req, res) => {
+	try {
+		const item = await SubProductModel.find()
+		if (item.length > 0) {
+			const promises = item.map(async (i) => {
+				const price = i.price
+				const costPrice = Math.floor(price * 0.7)
+				await SubProductModel.findByIdAndUpdate(i._id, {
+					costPrice
+				})
+			})
+			await Promise.all(promises)
 		}
+		res.status(200).json({
+			data: item,
+			message: 'Update all OK',
+		});
 	} catch (error) {
 		res.status(404).json({
-			message: error.message,
+			error: error.message,
 		});
 	}
-}
+};
+
+
 const addProduct = async (req, res) => {
 	const body = req.body;
 
@@ -257,7 +289,6 @@ const getProductDetail = async (req, res) => {
 			productId: id,
 			isDeleted: false,
 		});
-
 		res.status(200).json({
 			message: 'Products',
 			data: {
@@ -271,42 +302,66 @@ const getProductDetail = async (req, res) => {
 		});
 	}
 };
-const removeSubProduct= async(req, res)=>{
-const {id,isSoftDelete} = req.query
-try {
-	if(isSoftDelete){
-		await SubProductModel.findByIdAndUpdate(id,{isDeleted:true})
-	}else{
-		await SubProductModel.findByIdAndDelete(id)
-		
-	}
-	res.status.json({
-		message:'Deleted !!!'
-	})
-} catch (error) {
-	res.status(404).json({
-		message: error.message,
-	});
-}
-}
-
-const addSubProduct = async (req, res) => {
-	const body = req.body
+const removeSubProduct = async (req, res) => {
+	const { id, isSoftDelete } = req.query
 	try {
-		const subProduct = new SubProductModel(body)
+		if (isSoftDelete) {
+			await SubProductModel.findByIdAndUpdate(id, { isDeleted: true })
+		} else {
+			await SubProductModel.findByIdAndDelete(id)
 
-		subProduct.save()
-
+		}
 		res.status(200).json({
-			message: 'Add sub product successfully!!!',
-			data: subProduct
-		});
+			message: 'Deleted !!!'
+		})
 	} catch (error) {
 		res.status(404).json({
 			message: error.message,
 		});
 	}
+}
+
+const addSubProduct = async (req, res) => {
+	const body = req.body;
+	const { productId, size, qty, costPrice, price } = body;
+
+	try {
+		// Kiểm tra xem sub-product đã tồn tại chưa
+		const existingSubProduct = await SubProductModel.findOne({
+			productId,
+			size,
+			isDeleted: false, // Đảm bảo không tính những sản phẩm đã bị xóa
+		});
+
+		if (existingSubProduct) {
+			// Nếu đã tồn tại, cập nhật số lượng và giá
+			existingSubProduct.qty += qty;
+			existingSubProduct.costPrice = costPrice; // cập nhật giá nhập mới
+			existingSubProduct.price = price;         // cập nhật giá bán mới
+
+			await existingSubProduct.save();
+
+			return res.status(200).json({
+				message: 'Updated existing sub-product successfully!',
+				data: existingSubProduct,
+			});
+		}
+
+		// Tạo mới nếu không tồn tại
+		const subProduct = new SubProductModel(body);
+		await subProduct.save();
+
+		res.status(200).json({
+			message: 'Add sub-product successfully!',
+			data: subProduct,
+		});
+	} catch (error) {
+		res.status(500).json({
+			message: error.message,
+		});
+	}
 };
+
 
 const updateProduct = async (req, res) => {
 	const body = req.body
@@ -355,67 +410,66 @@ const removeProduct = async (req, res) => {
 	}
 };
 const filterProducts = async (req, res) => {
-	const { colors, size, price, categories } = req.body;
-  
-	let subProductFilter = {};
-	if (colors && colors.length > 0) {
-	  subProductFilter.color = { $all: colors };
-	}
+	const { size, price, categories } = req.body;
+	console.log(size, price, categories);
+
+	// Xây dựng bộ lọc cho SubProduct
+	let subProductFilter = { isDeleted: false };
 	if (size) {
-	  subProductFilter.size = size;
+		subProductFilter.size = size;
 	}
-	subProductFilter.isDeleted = false;
-  
 	if (price && price.length === 2) {
-	  subProductFilter.price = { $gte: price[0], $lte: price[1] };
+		subProductFilter.price = { $gte: price[0], $lte: price[1] };
 	}
-  
+
 	try {
-	  // Tìm tất cả SubProduct dựa trên bộ lọc (ngoại trừ categories)
-	  const subProducts = await SubProductModel.find(subProductFilter);
-  
-	  // Lấy danh sách productId từ subProducts
-	  const subProductIds = subProducts.map((item) => item.productId);
-  
-	  // Xây dựng bộ lọc cho Product
-	  let productFilter = { isDeleted: false };
-	  if (categories && categories.length > 0) {
-		productFilter.categories = { $in: categories };
-	  }
-  
-	  // Tìm các Product thỏa mãn bộ lọc và đảm bảo bao gồm productId từ subProducts
-	  const products = await ProductModel.find({
-		$or: [
-		  { _id: { $in: subProductIds } }, // Products có SubProducts thỏa mãn
-		  productFilter,                  // Products thỏa mãn categories
-		],
-	  });
-  
-	  // Tạo danh sách kết quả (kèm subItems)
-	  const result = products.map((product) => {
-		const subItems = subProducts.filter(
-		  (sub) => sub.productId.toString() === product._id.toString()
-		);
-		return { ...product._doc, subItems };
-	  });
-  
-	  // Trả kết quả
-	  res.status(200).json({
-		data: {
-		  items: result,
-		  totalItems: result.length,
-		},
-	  });
+		// Tìm tất cả SubProduct thỏa mãn bộ lọc size và price
+		const subProducts = await SubProductModel.find(subProductFilter);
+
+		// Lấy danh sách productId từ subProducts
+		const subProductIds = subProducts.map((item) => item.productId);
+
+		// Xây dựng bộ lọc cho Product:
+		// - Sản phẩm phải có _id nằm trong subProductIds (có SubProduct thỏa mãn)
+		// - Nếu có categories thì lọc theo danh mục
+		let productFilter = {
+			isDeleted: false,
+			_id: { $in: subProductIds }
+		};
+		if (categories && categories.length > 0) {
+			productFilter.categories = { $in: categories };
+		}
+
+		// Tìm các Product thỏa mãn bộ lọc trên
+		const products = await ProductModel.find(productFilter);
+
+		// Tạo danh sách kết quả với subItems kèm theo
+		const result = products.map((product) => {
+			const subItems = subProducts.filter(
+				(sub) => sub.productId.toString() === product._id.toString()
+			);
+			return { ...product._doc, subItems };
+		});
+
+		res.status(200).json({
+			data: {
+				items: result,
+				totalItems: result.length,
+			},
+		});
 	} catch (error) {
-	  res.status(500).json({
-		message: error.message,
-	  });
+		res.status(500).json({
+			message: error.message,
+		});
 	}
-  };
-  const updateSubProduct = async (req, res) => {
+};
+
+const updateSubProduct = async (req, res) => {
 	const { id } = req.query;
 	const body = req.body;
+	const { productId, size } = body;
 	try {
+
 		await SubProductModel.findByIdAndUpdate(id, body);
 
 		res.status(200).json({
@@ -427,8 +481,154 @@ const filterProducts = async (req, res) => {
 		});
 	}
 };
-  
+const getMinMaxPrice = async (id) => {
+	const subItems = await SubProductModel.find({ productId: id });
+
+	const nums = subItems.map((item) => item.price);
+
+	return [Math.min(...nums), Math.max(...nums)];
+};
+const getMaxPrice = async (_req, res) => {
+	try {
+		const items = await SubProductModel.find().sort({ price: -1 }).limit(1);
+		res.status(200).json({
+			message: '',
+			data: items
+		})
+	} catch (error) {
+		res.status(404).json({
+			message: error.message,
+		});
+	}
+};
+const getBestSellers = async (req, res) => {
+	try {
+
+		const items = await ProductModel.find().limit(8);
+		const data = [];
+
+		items.forEach(async (item) => {
+			data.push({ ...item._doc, price: await getMinMaxPrice(item._id) });
+
+			data.length === items.length && res.status(200).json({ data });
+		});
+	} catch (error) {
+		res.status(404).json({
+			message: error.message,
+		});
+	}
+};
+
+const getRandomSubProducts = async (req, res) => {
+	try {
+		const categories = await CategoryModel.find({ parentId: "" });
+
+		const result = [];
+		const usedProductIds = new Set(); // Lưu trữ các sản phẩm đã chọn để tránh trùng lặp
+
+		for (const category of categories) {
+			// Lấy 1 sản phẩm từ ProductModel có categories khớp và chưa được chọn
+			const product = await ProductModel.aggregate([
+				{
+					$match: {
+						categories: category._id.toString(), // Lọc theo category
+						_id: { $nin: Array.from(usedProductIds) } // Loại trừ các sản phẩm đã chọn
+					}
+				},
+				{ $sample: { size: 1 } } // Lấy ngẫu nhiên 1 sản phẩm
+			]);
+
+			if (product.length > 0) {
+				usedProductIds.add(product[0]._id); // Thêm sản phẩm đã chọn vào danh sách
+			}
+
+			// Thêm category và product vào kết quả
+			result.push({
+				...category.toObject(),
+				product: product.length > 0 ? product[0] : null, // Nếu không có sản phẩm, để null
+			});
+
+			// Nếu số lượng sản phẩm đạt 8 thì dừng
+			if (result.length === 8) break;
+		}
+
+		res.status(200).json({
+			message: 'Các subproducts ngẫu nhiên',
+			data: result // Chuyển đổi Set thành mảng và lấy 8 phần tử
+		});
+	} catch (error) {
+		console.error('Error:', error.message);
+		res.status(500).json({
+			message: error.message,
+		});
+	}
+};
+const getRelatedProducts = async (req, res) => {
+	const { id } = req.query;
+	try {
+		const product = await ProductModel.findById(id);
+
+		if (!product) {
+			throw new Error('Product not found');
+		}
+
+		const categoryId =
+			product.categories && product.categories.length > 0
+				? product.categories[0]
+				: undefined;
+
+		if (!categoryId) {
+			throw new Error('Categories not found!');
+		}
+
+		const items = await ProductModel.find({ categories: { $in: categoryId } });
+
+		const datas = items.length > 4 ? items.splice(0, 4) : items;
+
+		const products = [];
+
+		datas.forEach(async (item) => {
+			products.push({ ...item._doc, price: await getMinMaxPrice(item._id) });
+
+			products.length === datas.length &&
+				res.status(200).json({ data: products });
+		});
+		// res.status(200).json({ data: products });
+	} catch (error) {
+		res.status(404).json({
+			message: error.message,
+		});
+	}
+};
+
+const getProductOptions = async (_req, res) => {
+	try {
+		const items = await ProductModel.find({
+			isDeleted: false,
+		});
+
+		const data = items.map((item) => ({
+			value: item._id,
+			label: item.title,
+		}));
+
+		res.status(200).json({
+			data,
+			message: 'OK',
+		});
+	} catch (error) {
+		res.status(404).json({
+			message: error.message,
+		});
+	}
+};
+
+
+
+
 module.exports = {
+	getRandomSubProducts,
+	getRelatedProducts,
 	updateSubProduct,
 	removeSubProduct,
 	filterProducts,
@@ -442,5 +642,7 @@ module.exports = {
 	deleteCategories,
 	getProduct,
 	addCategory,
-	getCategories, getFilterValues
+	getCategories, getFilterValues, getBestSellers, getMaxPrice,
+	getAllSubProducts,
+	getProductOptions
 }
