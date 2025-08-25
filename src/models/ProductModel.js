@@ -6,6 +6,7 @@ const ProductChema = new Schema ({
 		type: String,
 		required: true,
 	},
+	fragrance: String,
 	slug: String,
 	description: String,
 	categories: [String],

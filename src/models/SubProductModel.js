@@ -1,30 +1,39 @@
-const mongoose = require('mongoose')
-const { Schema } = require('mongoose')
-// create  object user
-const SubProductsChema = new Schema({
+const mongoose = require('mongoose');
+const { Schema } = mongoose;
+
+const scheme = new Schema(
+  {
     size: String,
-    color: String,
     price: {
-        type: Number,
-        require: true
+      type: Number,
+      required: true,
+    },
+    costPrice: {
+      type: Number,
+      required: true,
     },
     qty: {
-        type: Number,
-        default: 0,
-        require: true
+      type: Number,
+      default: 0,
+      required: true,
+    },
+    discount: {
+      type: Number,
     },
     productId: {
-        type: String,
-        require: true
+      type: String,
+      required: true,
+      ref: 'products'
     },
     images: [String],
-    isDeleted:{
-        type:Boolean,
-        default:false
-    }
-}, {
-    timestamps: true
-}
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  { timestamps: true }
 );
-const SubProductModel = mongoose.model('subproducts', SubProductsChema);//save in collectiion user and get information as UsersChema
-module.exports = SubProductModel
+
+const SubProductModel = mongoose.model('subproducts', scheme);
+
+module.exports = SubProductModel;

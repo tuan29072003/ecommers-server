@@ -1,0 +1,6 @@
+{
+  "vnp_TmnCode": "M4CZ8E16",
+  "vnp_HashSecret": "BTS4G8PKGGZRMWIUICRM9M9DGNV236MJ",
+  "vnp_Url": "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html",
+  "vnp_ReturnUrl": "http://localhost:3000/shop/checkout"
+}
